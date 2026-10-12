@@ -35,3 +35,22 @@ decide_label() {
 
 	printf '%s\n' "$title"
 }
+
+# decide_workspace_title: work out the title a workspace should show from one
+# of its panes. The workspace shows the focused pane of its active tab.
+#
+# Arguments:
+#   $1 agent        agent kind in the pane
+#   $2 title        pane terminal title with status glyphs stripped
+#   $3 pane_id      pane the event is about
+#   $4 naming_pane  focused pane of the workspace's active tab, or empty
+#
+# Prints the title, or nothing when this pane should not set it.
+decide_workspace_title() {
+	[ "$1" = "claude" ] || return 0
+	[ -n "$2" ] || return 0
+	[ "$2" != "$CLAUDE_DEFAULT_TITLE" ] || return 0
+	[ "$3" = "$4" ] || return 0
+
+	printf '%s\n' "$2"
+}

@@ -4,7 +4,7 @@ id = "herdr-tab-titles"
 name = "Tab Titles"
 version = "0.1.0"
 min_herdr_version = "0.9.1"
-description = "Names tabs after the Claude Code session running in them, like Claude Desktop's session titles."
+description = "Names tabs after the Claude Code session running in them, and shows that title in the workspace sidebar."
 platforms = ["macos", "linux"]
 
 # Claude Code retitles its terminal as the work changes; a status change is
