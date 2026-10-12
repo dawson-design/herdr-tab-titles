@@ -1,7 +1,7 @@
 #!/bin/sh
 # Herdr event hook: copies the title Claude Code gives its session into the
-# label of the herdr tab the pane lives in, and into a $title token on its
-# workspace for the sidebar. herdr-plugin.toml runs this on
+# label of the herdr tab the pane lives in, and into a $session_title token
+# on its workspace for the sidebar. herdr-plugin.toml runs this on
 # pane.agent_status_changed and pane.focused. The decisions live in
 # lib/decide.sh; this file only gathers inputs from herdr and applies them.
 #
@@ -17,6 +17,8 @@ root=$(dirname "$0")/..
 herdr=${HERDR_BIN_PATH:-herdr}
 pane_id=${HERDR_PANE_ID:-}
 state_dir=${HERDR_PLUGIN_STATE_DIR:-}
+# Workspace metadata key; namespaced because keys are shared by all reporters.
+token=session_title
 
 # json_field JSON FILTER: print one jq field, or empty when missing.
 json_field() {
@@ -29,51 +31,84 @@ state_file() {
 	printf '%s/%s' "$state_dir" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_')"
 }
 
+# acquire_lock: serialise hook runs. herdr runs hooks concurrently, and two
+# interleaved runs could save a label that isn't the one shown, which would
+# then look like a manual rename forever. Waits about 5 s, takes over a lock
+# older than a minute (a crashed run), and releases the lock on exit.
+acquire_lock() {
+	lock="$state_dir/.lock"
+	tries=0
+	until mkdir "$lock" 2>/dev/null; do
+		tries=$((tries + 1))
+		[ "$tries" -le 50 ] || return 1
+		if [ -n "$(find "$lock" -prune -mmin +1 2>/dev/null)" ]; then
+			rmdir "$lock" 2>/dev/null
+			continue
+		fi
+		sleep 0.1
+	done
+	trap 'rmdir "$lock" 2>/dev/null' EXIT
+	trap 'exit 0' HUP INT TERM
+}
+
 # sync_tab: name the pane's tab after its title.
 sync_tab() {
-	layout=$("$herdr" pane layout --pane "$pane_id" 2>/dev/null) || return 0
-	focused_pane_id=$(json_field "$layout" '.result.layout.focused_pane_id')
+	# Cheap early exit: only Claude panes with a title can name a tab.
+	usable_title "$agent" "$title" || return 0
 	tab=$("$herdr" tab get "$tab_id" 2>/dev/null) || return 0
 	tab_label=$(json_field "$tab" '.result.tab.label')
-	number=$(json_field "$tab" '.result.tab.number')
 	state=$(state_file "$tab_id")
 	last_set=$(cat "$state" 2>/dev/null || true)
 
 	new_label=$(decide_label "$agent" "$title" "$pane_id" "$focused_pane_id" \
-		"$tab_label" "$number" "$last_set")
+		"$tab_label" "$last_set")
 	[ -n "$new_label" ] || return 0
-	"$herdr" tab rename "$tab_id" "$new_label" >/dev/null 2>&1 || return 0
-	printf '%s' "$new_label" >"$state" 2>/dev/null
+	renamed=$("$herdr" tab rename "$tab_id" "$new_label" 2>/dev/null) || return 0
+	# Remember the label herdr stored, so the manual-rename check compares
+	# like with like.
+	stored=$(json_field "$renamed" '.result.tab.label')
+	printf '%s' "${stored:-$new_label}" >"$state" 2>/dev/null
 }
 
-# sync_workspace: publish the title as the workspace's $title sidebar token
-# when the pane is what the workspace shows: the focused pane of its active
-# tab. The workspace name itself is left alone.
+# sync_workspace: set or clear the workspace's title token from the pane the
+# workspace shows: the focused pane of its active tab.
 sync_workspace() {
 	workspace=$("$herdr" workspace get "$workspace_id" 2>/dev/null) || return 0
 	active_tab_id=$(json_field "$workspace" '.result.workspace.active_tab_id')
+	current=$(json_field "$workspace" ".result.workspace.tokens.$token")
 	naming_pane=""
 	[ "$active_tab_id" = "$tab_id" ] && naming_pane=$focused_pane_id
 
-	ws_title=$(decide_workspace_title "$agent" "$title" "$pane_id" "$naming_pane")
-	[ -n "$ws_title" ] || return 0
-	"$herdr" workspace report-metadata "$workspace_id" \
-		--source herdr-tab-titles --token "title=$ws_title" >/dev/null 2>&1
+	action=$(decide_workspace_token "$agent" "$title" "$pane_id" "$naming_pane")
+	case $action in
+	set:*)
+		[ "$current" != "${action#set:}" ] || return 0
+		"$herdr" workspace report-metadata "$workspace_id" --source herdr-tab-titles \
+			--token "$token=${action#set:}" >/dev/null 2>&1
+		;;
+	clear)
+		[ -n "$current" ] || return 0
+		"$herdr" workspace report-metadata "$workspace_id" --source herdr-tab-titles \
+			--clear-token "$token" >/dev/null 2>&1
+		;;
+	esac
 }
 
 [ -n "$pane_id" ] && [ -n "$state_dir" ] || exit 0
+acquire_lock || exit 0
 
+# Read the pane inside the lock so the last run applies the newest state.
 pane=$("$herdr" pane get "$pane_id" 2>/dev/null) || exit 0
 agent=$(json_field "$pane" '.result.pane.agent')
-# Most events come from non-Claude panes; stop before any more herdr calls.
-[ "$agent" = "claude" ] || exit 0
-
-title=$(json_field "$pane" '.result.pane.terminal_title_stripped')
+# The title comes from the terminal and is untrusted; drop control characters.
+title=$(json_field "$pane" '.result.pane.terminal_title_stripped' | tr -d '[:cntrl:]')
 tab_id=$(json_field "$pane" '.result.pane.tab_id')
 workspace_id=$(json_field "$pane" '.result.pane.workspace_id')
 [ -n "$tab_id" ] && [ -n "$workspace_id" ] || exit 0
 
-focused_pane_id=""
+layout=$("$herdr" pane layout --pane "$pane_id" 2>/dev/null) || exit 0
+focused_pane_id=$(json_field "$layout" '.result.layout.focused_pane_id')
+
 sync_tab
 sync_workspace
 exit 0
