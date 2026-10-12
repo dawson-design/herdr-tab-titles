@@ -1,0 +1,49 @@
+#!/bin/sh
+# Herdr event hook: copies the title Claude Code gives its session into the
+# label of the herdr tab the pane lives in. herdr-plugin.toml runs this on
+# pane.agent_status_changed and pane.focused. The decision itself lives in
+# lib/decide.sh; this file only gathers inputs from herdr and applies the
+# result.
+#
+# Runs on every matching event, so it always exits 0: a failure here must
+# never surface as a broken hook in herdr.
+
+set -u
+
+root=$(dirname "$0")/..
+# shellcheck source=lib/decide.sh
+. "$root/lib/decide.sh"
+
+herdr=${HERDR_BIN_PATH:-herdr}
+pane_id=${HERDR_PANE_ID:-}
+state_dir=${HERDR_PLUGIN_STATE_DIR:-}
+
+[ -n "$pane_id" ] && [ -n "$state_dir" ] || exit 0
+
+pane=$("$herdr" pane get "$pane_id" 2>/dev/null) || exit 0
+agent=$(printf '%s' "$pane" | jq -r '.result.pane.agent // ""')
+# Most events come from non-Claude panes; stop before any more herdr calls.
+[ "$agent" = "claude" ] || exit 0
+
+title=$(printf '%s' "$pane" | jq -r '.result.pane.terminal_title_stripped // ""')
+tab_id=$(printf '%s' "$pane" | jq -r '.result.pane.tab_id // ""')
+[ -n "$tab_id" ] || exit 0
+
+layout=$("$herdr" pane layout --pane "$pane_id" 2>/dev/null) || exit 0
+focused_pane_id=$(printf '%s' "$layout" | jq -r '.result.layout.focused_pane_id // ""')
+
+tab=$("$herdr" tab get "$tab_id" 2>/dev/null) || exit 0
+label=$(printf '%s' "$tab" | jq -r '.result.tab.label // ""')
+number=$(printf '%s' "$tab" | jq -r '.result.tab.number // ""')
+
+# Tab ids look like "w1:t1"; keep the state file name free of separators.
+state_file="$state_dir/$(printf '%s' "$tab_id" | tr -c 'A-Za-z0-9_-' '_')"
+last_set=$(cat "$state_file" 2>/dev/null || true)
+
+new_label=$(decide_label "$agent" "$title" "$pane_id" "$focused_pane_id" \
+	"$label" "$number" "$last_set")
+[ -n "$new_label" ] || exit 0
+
+"$herdr" tab rename "$tab_id" "$new_label" >/dev/null 2>&1 || exit 0
+printf '%s' "$new_label" >"$state_file" 2>/dev/null
+exit 0

@@ -1,0 +1,19 @@
+# Names each herdr tab after the work in it, using the title Claude Code
+# already gives its session. See README.md.
+id = "herdr-tab-titles"
+name = "Tab Titles"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "Names tabs after the Claude Code session running in them, like Claude Desktop's session titles."
+platforms = ["macos", "linux"]
+
+# Claude Code retitles its terminal as the work changes; a status change is
+# the earliest point herdr tells plugins about it.
+[[events]]
+on = "pane.agent_status_changed"
+command = ["sh", "bin/sync-tab-title"]
+
+# In a split tab the label follows the focused pane, so refocusing renames.
+[[events]]
+on = "pane.focused"
+command = ["sh", "bin/sync-tab-title"]
