@@ -1,9 +1,9 @@
 #!/bin/sh
 # Herdr event hook: copies the title Claude Code gives its session into the
-# label of the herdr tab the pane lives in. herdr-plugin.toml runs this on
-# pane.agent_status_changed and pane.focused. The decision itself lives in
-# lib/decide.sh; this file only gathers inputs from herdr and applies the
-# result.
+# label of the herdr tab the pane lives in, and into a $title token on its
+# workspace for the sidebar. herdr-plugin.toml runs this on
+# pane.agent_status_changed and pane.focused. The decisions live in
+# lib/decide.sh; this file only gathers inputs from herdr and applies them.
 #
 # Runs on every matching event, so it always exits 0: a failure here must
 # never surface as a broken hook in herdr.
@@ -18,32 +18,62 @@ herdr=${HERDR_BIN_PATH:-herdr}
 pane_id=${HERDR_PANE_ID:-}
 state_dir=${HERDR_PLUGIN_STATE_DIR:-}
 
+# json_field JSON FILTER: print one jq field, or empty when missing.
+json_field() {
+	printf '%s' "$1" | jq -r "$2 // \"\""
+}
+
+# state_file TAB_ID: where the last label the plugin gave a tab is kept.
+# Tab ids look like "w1:t1"; keep the file name free of separators.
+state_file() {
+	printf '%s/%s' "$state_dir" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_')"
+}
+
+# sync_tab: name the pane's tab after its title.
+sync_tab() {
+	layout=$("$herdr" pane layout --pane "$pane_id" 2>/dev/null) || return 0
+	focused_pane_id=$(json_field "$layout" '.result.layout.focused_pane_id')
+	tab=$("$herdr" tab get "$tab_id" 2>/dev/null) || return 0
+	tab_label=$(json_field "$tab" '.result.tab.label')
+	number=$(json_field "$tab" '.result.tab.number')
+	state=$(state_file "$tab_id")
+	last_set=$(cat "$state" 2>/dev/null || true)
+
+	new_label=$(decide_label "$agent" "$title" "$pane_id" "$focused_pane_id" \
+		"$tab_label" "$number" "$last_set")
+	[ -n "$new_label" ] || return 0
+	"$herdr" tab rename "$tab_id" "$new_label" >/dev/null 2>&1 || return 0
+	printf '%s' "$new_label" >"$state" 2>/dev/null
+}
+
+# sync_workspace: publish the title as the workspace's $title sidebar token
+# when the pane is what the workspace shows: the focused pane of its active
+# tab. The workspace name itself is left alone.
+sync_workspace() {
+	workspace=$("$herdr" workspace get "$workspace_id" 2>/dev/null) || return 0
+	active_tab_id=$(json_field "$workspace" '.result.workspace.active_tab_id')
+	naming_pane=""
+	[ "$active_tab_id" = "$tab_id" ] && naming_pane=$focused_pane_id
+
+	ws_title=$(decide_workspace_title "$agent" "$title" "$pane_id" "$naming_pane")
+	[ -n "$ws_title" ] || return 0
+	"$herdr" workspace report-metadata "$workspace_id" \
+		--source herdr-tab-titles --token "title=$ws_title" >/dev/null 2>&1
+}
+
 [ -n "$pane_id" ] && [ -n "$state_dir" ] || exit 0
 
 pane=$("$herdr" pane get "$pane_id" 2>/dev/null) || exit 0
-agent=$(printf '%s' "$pane" | jq -r '.result.pane.agent // ""')
+agent=$(json_field "$pane" '.result.pane.agent')
 # Most events come from non-Claude panes; stop before any more herdr calls.
 [ "$agent" = "claude" ] || exit 0
 
-title=$(printf '%s' "$pane" | jq -r '.result.pane.terminal_title_stripped // ""')
-tab_id=$(printf '%s' "$pane" | jq -r '.result.pane.tab_id // ""')
-[ -n "$tab_id" ] || exit 0
+title=$(json_field "$pane" '.result.pane.terminal_title_stripped')
+tab_id=$(json_field "$pane" '.result.pane.tab_id')
+workspace_id=$(json_field "$pane" '.result.pane.workspace_id')
+[ -n "$tab_id" ] && [ -n "$workspace_id" ] || exit 0
 
-layout=$("$herdr" pane layout --pane "$pane_id" 2>/dev/null) || exit 0
-focused_pane_id=$(printf '%s' "$layout" | jq -r '.result.layout.focused_pane_id // ""')
-
-tab=$("$herdr" tab get "$tab_id" 2>/dev/null) || exit 0
-label=$(printf '%s' "$tab" | jq -r '.result.tab.label // ""')
-number=$(printf '%s' "$tab" | jq -r '.result.tab.number // ""')
-
-# Tab ids look like "w1:t1"; keep the state file name free of separators.
-state_file="$state_dir/$(printf '%s' "$tab_id" | tr -c 'A-Za-z0-9_-' '_')"
-last_set=$(cat "$state_file" 2>/dev/null || true)
-
-new_label=$(decide_label "$agent" "$title" "$pane_id" "$focused_pane_id" \
-	"$label" "$number" "$last_set")
-[ -n "$new_label" ] || exit 0
-
-"$herdr" tab rename "$tab_id" "$new_label" >/dev/null 2>&1 || exit 0
-printf '%s' "$new_label" >"$state_file" 2>/dev/null
+focused_pane_id=""
+sync_tab
+sync_workspace
 exit 0

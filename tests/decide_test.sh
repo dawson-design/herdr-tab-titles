@@ -34,6 +34,27 @@ expect "ignores Claude's default title" "" claude "Claude Code" w1:p1 w1:p1 "1" 
 expect "ignores unfocused pane in split tab" "" claude "Fix login" w1:p2 w1:p1 "1" 1 ""
 expect "no-op when label already matches" "" claude "Fix login" w1:p1 w1:p1 "Fix login" 1 "Fix login"
 
+# expect_ws NAME EXPECTED ARGS... : same, for decide_workspace_title.
+expect_ws() {
+	name=$1 expected=$2
+	shift 2
+	actual=$(decide_workspace_title "$@")
+	if [ "$actual" = "$expected" ]; then
+		echo "ok   $name"
+	else
+		echo "FAIL $name: expected '$expected', got '$actual'"
+		failures=$((failures + 1))
+	fi
+}
+
+#         name                                    expected    agent  title       pane  naming_pane
+expect_ws "workspace shows active pane's title" "Fix login" claude "Fix login" w1:p1 w1:p1
+expect_ws "workspace ignores other panes" "" claude "Fix login" w1:p2 w1:p1
+expect_ws "workspace ignores inactive tabs" "" claude "Fix login" w1:p2 ""
+expect_ws "workspace ignores non-Claude agents" "" codex "Fix login" w1:p1 w1:p1
+expect_ws "workspace ignores empty title" "" claude "" w1:p1 w1:p1
+expect_ws "workspace ignores Claude's default title" "" claude "Claude Code" w1:p1 w1:p1
+
 if [ "$failures" -gt 0 ]; then
 	echo "$failures failed"
 	exit 1
