@@ -43,7 +43,8 @@ Each agent also needs its herdr integration, for example
 herdr plugin install dawson-design/herdr-tab-titles
 ```
 
-For local development, link a checkout instead:
+To pin a release, add `--ref v0.1.0`. For local development, link a checkout
+instead:
 
 ```sh
 herdr plugin link "$PWD"
@@ -68,10 +69,27 @@ herdr cuts token values at 80 characters, so long titles are shortened in
 the sidebar but not on the tab. Tokens don't survive a herdr server restart;
 the line stays blank until the agent's next status change or focus change.
 
+## What it runs
+
+The plugin is a POSIX shell script. It calls only the herdr CLI and `jq`, and
+reads Codex's session index when a Codex pane is involved. It never calls a
+model and makes no network requests. It keeps one small file per tab under
+herdr's plugin state directory.
+
+## Troubleshooting
+
+Each hook run is logged by herdr:
+
+```sh
+herdr plugin log list --plugin herdr-tab-titles
+```
+
+A missing `jq` shows up there as `jq not found on PATH`.
+
 ## How it works
 
-`herdr-plugin.toml` runs `bin/sync-tab-title` on `pane.agent_status_changed`
-and `pane.focused`. The script reads the pane, its tab and the tab's focused
+`herdr-plugin.toml` runs `bin/sync-tab-title` on `pane.agent_status_changed`,
+`pane.focused` and `tab.closed`. The script reads the pane, its tab and the tab's focused
 pane through the herdr CLI, then calls `decide_label` and
 `decide_workspace_token` in `lib/decide.sh`. Those functions hold every rule
 above and have no I/O. The workspace title is published with
@@ -90,5 +108,5 @@ sh scripts/check.sh
 ```
 
 This runs shellcheck, shfmt, the unit tests in `tests/decide_test.sh`, and
-`tests/hook_test.sh`, which runs the hook against a fake `herdr` CLI. CI runs the same
-script.
+`tests/hook_test.sh`, which runs the hook against a fake `herdr` CLI. CI runs
+the same script.
