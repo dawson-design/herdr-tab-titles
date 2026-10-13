@@ -3,7 +3,8 @@
 # into the label of the herdr tab the pane lives in, and into a
 # $session_title token on its workspace for the sidebar. Claude's title comes
 # from its terminal title; Codex's thread name from Codex's session index.
-# herdr-plugin.toml runs this on pane.agent_status_changed and pane.focused. The decisions live in
+# herdr-plugin.toml runs this on pane.agent_status_changed, pane.focused and
+# tab.closed. The decisions live in
 # lib/decide.sh; this file only gathers inputs from herdr and applies them.
 #
 # Runs on every matching event, so it always exits 0: a failure here must
@@ -40,6 +41,20 @@ codex_thread_name() {
 	index="${CODEX_HOME:-$HOME/.codex}/session_index.jsonl"
 	grep -F "\"id\":\"$1\"" "$index" 2>/dev/null | tail -n 1 |
 		jq -r '.thread_name // ""' 2>/dev/null
+}
+
+# shown_pane WORKSPACE_ID: the pane a workspace shows, the focused pane of its
+# active tab. Used for tab.closed, which names a workspace but no pane.
+shown_pane() {
+	[ -n "$1" ] || return 0
+	ws=$("$herdr" workspace get "$1" 2>/dev/null) || return 0
+	active=$(json_field "$ws" '.result.workspace.active_tab_id')
+	panes=$("$herdr" pane list --workspace "$1" 2>/dev/null) || return 0
+	any=$(printf '%s' "$panes" |
+		jq -r --arg t "$active" '[.result.panes[] | select(.tab_id == $t)][0].pane_id // ""')
+	[ -n "$any" ] || return 0
+	layout=$("$herdr" pane layout --pane "$any" 2>/dev/null) || return 0
+	json_field "$layout" '.result.layout.focused_pane_id'
 }
 
 # acquire_lock: serialise hook runs. herdr runs hooks concurrently, and two
@@ -105,8 +120,13 @@ sync_workspace() {
 	esac
 }
 
-[ -n "$pane_id" ] && [ -n "$state_dir" ] || exit 0
+[ -n "$state_dir" ] || exit 0
 acquire_lock || exit 0
+
+# Closing a tab changes what its workspace shows, but herdr only sends focus
+# events for the workspace on screen, so resolve the shown pane ourselves.
+[ -n "$pane_id" ] || pane_id=$(shown_pane "${HERDR_WORKSPACE_ID:-}")
+[ -n "$pane_id" ] || exit 0
 
 # Read the pane inside the lock so the last run applies the newest state.
 pane=$("$herdr" pane get "$pane_id" 2>/dev/null) || exit 0
