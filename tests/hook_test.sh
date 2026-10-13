@@ -25,6 +25,7 @@ case "$1 $2" in
 "pane layout") cat "$dir/layout.json" ;;
 "tab get") cat "$dir/tab.json" ;;
 "workspace get") cat "$dir/workspace.json" ;;
+"pane list") cat "$dir/panes.json" ;;
 "tab rename") jq -n --arg l "$4" '{result: {tab: {label: $l}}}' ;;
 esac
 FAKE
@@ -39,6 +40,7 @@ given() {
 		  tab_id: "w1:t1", workspace_id: "w1",
 		  agent_session: {value: "thread-1"}}}}' >"$dir/pane.json"
 	jq -n --arg f "$4" '{result: {layout: {focused_pane_id: $f}}}' >"$dir/layout.json"
+	jq -n --arg p "$3" '{result: {panes: [{pane_id: $p, tab_id: "w1:t1"}]}}' >"$dir/panes.json"
 	jq -n --arg l "$5" '{result: {tab: {label: $l}}}' >"$dir/tab.json"
 	jq -n --arg v "$6" '{result: {workspace: {active_tab_id: "w1:t1",
 		tokens: (if $v == "" then {} else {session_title: $v} end)}}}' >"$dir/workspace.json"
@@ -57,6 +59,13 @@ codex_names() {
 # run_hook PANE: run the hook as herdr would for an event on PANE.
 run_hook() {
 	HERDR_BIN_PATH="$dir/herdr" HERDR_PANE_ID=$1 HERDR_PLUGIN_STATE_DIR="$dir/state" \
+		CODEX_HOME="$dir/codex" sh "$repo/bin/sync-tab-title"
+}
+
+# run_tab_closed: run the hook as herdr would for tab.closed in w1, which
+# carries a workspace id but no pane id.
+run_tab_closed() {
+	HERDR_BIN_PATH="$dir/herdr" HERDR_PANE_ID="" HERDR_WORKSPACE_ID=w1 HERDR_PLUGIN_STATE_DIR="$dir/state" \
 		CODEX_HOME="$dir/codex" sh "$repo/bin/sync-tab-title"
 }
 
@@ -135,6 +144,18 @@ run_hook w1:p1
 check "clears the token when Pi is shown" \
 	called "workspace report-metadata w1 --source herdr-tab-titles --clear-token session_title"
 check "leaves a Pi tab alone" not_called "tab rename"
+
+setup
+given pi "π - repo" w1:p2 w1:p2 "1" "Fix login"
+run_tab_closed
+check "tab.closed clears the token when the newly shown pane has no title" \
+	called "workspace report-metadata w1 --source herdr-tab-titles --clear-token session_title"
+
+setup
+given claude "Add tests" w1:p2 w1:p2 "1" "Fix login"
+run_tab_closed
+check "tab.closed shows the newly shown pane's title" \
+	called "workspace report-metadata w1 --source herdr-tab-titles --token session_title=Add tests"
 
 setup
 given claude "Fix login" w1:p1 w1:p1 "1" ""

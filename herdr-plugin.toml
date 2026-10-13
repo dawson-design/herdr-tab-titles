@@ -17,3 +17,9 @@ command = ["sh", "bin/sync-tab-title"]
 [[events]]
 on = "pane.focused"
 command = ["sh", "bin/sync-tab-title"]
+
+# Closing a tab in a workspace that isn't on screen sends no focus event, so
+# the workspace's sidebar title is refreshed from here.
+[[events]]
+on = "tab.closed"
+command = ["sh", "bin/sync-tab-title"]
