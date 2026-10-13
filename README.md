@@ -3,29 +3,39 @@
 A [herdr](https://herdr.dev) plugin that names each tab after the work
 happening in it, the way Claude Desktop titles its sessions.
 
-Claude Code already writes a short summary of the session into its terminal
-title, for example `Fix flaky login test`, and updates it as the work changes.
-This plugin copies that title into the herdr tab label. It makes no model
-calls of its own.
+Claude Code and Codex already have the model write a short title for each
+session, for example `Fix flaky login test`. This plugin copies that title
+into the herdr tab label. It makes no model calls of its own.
 
 ## Behaviour
 
-- A tab running Claude Code takes the session's title, and follows it when
-  Claude retitles the session.
-- In a split tab, the label follows the focused pane when it runs Claude Code.
+- A tab running a [supported agent](#supported-agents) takes the session's
+  title, and follows it when the agent retitles the session.
+- In a split tab, the label follows the focused pane when it runs a supported
+  agent.
 - A tab you rename yourself is left alone. The plugin only replaces herdr's
   automatic number label (any all-digit label) or a label it set itself.
 - Each workspace gets a `$session_title` sidebar token with the title of the
-  pane it is showing: the focused pane of its active tab. When that pane isn't
-  running Claude Code, the token is cleared. The workspace name is left alone;
+  pane it is showing: the focused pane of its active tab. When that pane has no
+  session title, the token is cleared. The workspace name is left alone;
   see [Sidebar](#sidebar) to display the token.
 - Other agents and plain shells never name a tab.
+
+## Supported agents
+
+| Agent | Setup |
+|---|---|
+| Claude Code | Works as installed. |
+| Codex | Works as installed. The plugin reads the thread name Codex records in `~/.codex/session_index.jsonl` (or `$CODEX_HOME`), matched by the session id herdr reports. That file is internal to Codex; if its format changes, Codex tabs stop being named until the plugin is updated. |
+| Pi, Antigravity and others | Not supported yet: they don't generate session titles. |
+
+Each agent also needs its herdr integration, for example
+`herdr integration install claude` or `herdr integration install codex`.
 
 ## Requirements
 
 - herdr 0.9.1 or later, on macOS or Linux
 - `jq` on `PATH`
-- Claude Code with the herdr integration: `herdr integration install claude`
 
 ## Install
 
@@ -71,7 +81,7 @@ apart from yours. herdr runs hooks concurrently, so the script takes a lock in
 that directory to stop two runs from interleaving.
 
 Because the title is read when the agent's status changes, a new title shows
-up at the next status change rather than the instant Claude sets it.
+up at the next status change rather than the instant the agent sets it.
 
 ## Tests
 
