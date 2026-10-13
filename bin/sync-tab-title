@@ -121,6 +121,11 @@ sync_workspace() {
 }
 
 [ -n "$state_dir" ] || exit 0
+if ! command -v jq >/dev/null 2>&1; then
+	# stderr shows up in `herdr plugin log`.
+	echo "herdr-tab-titles: jq not found on PATH" >&2
+	exit 0
+fi
 acquire_lock || exit 0
 
 # Closing a tab changes what its workspace shows, but herdr only sends focus
