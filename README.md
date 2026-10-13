@@ -110,3 +110,7 @@ sh scripts/check.sh
 This runs shellcheck, shfmt, the unit tests in `tests/decide_test.sh`, and
 `tests/hook_test.sh`, which runs the hook against a fake `herdr` CLI. CI runs
 the same script.
+
+## License
+
+[MIT](LICENSE)
