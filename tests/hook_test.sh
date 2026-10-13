@@ -36,17 +36,28 @@ FAKE
 given() {
 	jq -n --arg a "$1" --arg t "$2" --arg p "$3" \
 		'{result: {pane: {agent: $a, terminal_title_stripped: $t, pane_id: $p,
-		  tab_id: "w1:t1", workspace_id: "w1"}}}' >"$dir/pane.json"
+		  tab_id: "w1:t1", workspace_id: "w1",
+		  agent_session: {value: "thread-1"}}}}' >"$dir/pane.json"
 	jq -n --arg f "$4" '{result: {layout: {focused_pane_id: $f}}}' >"$dir/layout.json"
 	jq -n --arg l "$5" '{result: {tab: {label: $l}}}' >"$dir/tab.json"
 	jq -n --arg v "$6" '{result: {workspace: {active_tab_id: "w1:t1",
 		tokens: (if $v == "" then {} else {session_title: $v} end)}}}' >"$dir/workspace.json"
 }
 
+# codex_names NAME...: write a Codex session index where thread-1 was named
+# each NAME in turn, plus an unrelated thread.
+codex_names() {
+	mkdir -p "$dir/codex"
+	jq -nc '{id: "thread-2", thread_name: "Other thread"}' >"$dir/codex/session_index.jsonl"
+	for name in "$@"; do
+		jq -nc --arg n "$name" '{id: "thread-1", thread_name: $n}' >>"$dir/codex/session_index.jsonl"
+	done
+}
+
 # run_hook PANE: run the hook as herdr would for an event on PANE.
 run_hook() {
 	HERDR_BIN_PATH="$dir/herdr" HERDR_PANE_ID=$1 HERDR_PLUGIN_STATE_DIR="$dir/state" \
-		sh "$repo/bin/sync-tab-title"
+		CODEX_HOME="$dir/codex" sh "$repo/bin/sync-tab-title"
 }
 
 # check NAME CONDITION...: report whether the condition command succeeds.
@@ -105,6 +116,25 @@ setup
 given claude "$(printf 'Fix\a login')" w1:p1 w1:p1 "1" ""
 run_hook w1:p1
 check "strips control characters from titles" called "tab rename w1:t1 Fix login"
+
+setup
+codex_names "Draft name" "Export PDF pages"
+given codex "codex" w1:p1 w1:p1 "1" ""
+run_hook w1:p1
+check "renames a tab from the latest Codex thread name" called "tab rename w1:t1 Export PDF pages"
+
+setup
+codex_names
+given codex "codex" w1:p1 w1:p1 "1" ""
+run_hook w1:p1
+check "ignores the terminal title of an unnamed Codex thread" not_called "tab rename"
+
+setup
+given pi "π - repo" w1:p1 w1:p1 "1" "Fix login"
+run_hook w1:p1
+check "clears the token when Pi is shown" \
+	called "workspace report-metadata w1 --source herdr-tab-titles --clear-token session_title"
+check "leaves a Pi tab alone" not_called "tab rename"
 
 setup
 given claude "Fix login" w1:p1 w1:p1 "1" ""

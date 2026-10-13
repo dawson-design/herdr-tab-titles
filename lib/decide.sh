@@ -7,9 +7,18 @@
 # Title Claude Code shows before it has named the session.
 CLAUDE_DEFAULT_TITLE="Claude Code"
 
-# usable_title AGENT TITLE: succeed when a Claude pane has a real title.
+# usable_title AGENT TITLE: succeed when the pane's title describes the
+# session rather than being a placeholder.
+#   claude: the terminal title; "Claude Code" means not named yet.
+#   codex:  the thread name from Codex's session index; empty until named.
+# Other agents don't generate titles, so they never qualify.
 usable_title() {
-	[ "$1" = "claude" ] && [ -n "$2" ] && [ "$2" != "$CLAUDE_DEFAULT_TITLE" ]
+	[ -n "$2" ] || return 1
+	case $1 in
+	claude) [ "$2" != "$CLAUDE_DEFAULT_TITLE" ] ;;
+	codex) return 0 ;;
+	*) return 1 ;;
+	esac
 }
 
 # is_auto_tab_label LABEL: succeed when LABEL is herdr's automatic tab label.
@@ -26,7 +35,7 @@ is_auto_tab_label() {
 #
 # Arguments:
 #   $1 agent            agent kind in the pane ("claude", "codex", or empty)
-#   $2 title            pane terminal title with status glyphs stripped
+#   $2 title            session title read for the pane (see usable_title)
 #   $3 pane_id          pane the event is about
 #   $4 focused_pane_id  pane focused inside the pane's tab
 #   $5 label            tab's current label
@@ -54,11 +63,11 @@ decide_label() {
 #
 # Arguments:
 #   $1 agent        agent kind in the pane
-#   $2 title        pane terminal title with status glyphs stripped
+#   $2 title        session title read for the pane (see usable_title)
 #   $3 pane_id      pane the event is about
 #   $4 naming_pane  focused pane of the workspace's active tab, or empty
 #
-# Prints "set:<title>", "clear" when the shown pane has no usable Claude
+# Prints "set:<title>", "clear" when the shown pane has no usable session
 # title, or nothing when this pane isn't the one the workspace shows.
 decide_workspace_token() {
 	_agent=$1 _title=$2 _pane=$3 _naming=$4
